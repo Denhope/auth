@@ -3,71 +3,76 @@ import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { Transport } from '@nestjs/microservices';
 import { ExpressAdapter } from '@nestjs/platform-express';
-import express, { Request, Response } from 'express';
+import express from 'express';
 import helmet from 'helmet';
 
 import { AppModule } from './app/app.module';
 import { setupSwagger } from './swagger';
 
 async function bootstrap() {
-  const logger = new Logger();
-  const app = await NestFactory.create(
-    AppModule,
-    new ExpressAdapter(express()),
-    {
-      cors: true,
-    },
-  );
-
-  const configService = app.get(ConfigService);
-  const expressApp = app.getHttpAdapter().getInstance();
-
-  expressApp.get('/', (_req: Request, res: Response) => {
-    res.status(200).json({
-      status: 200,
-      message: `Hello from ${configService.get('app.name')}`,
-      data: {
-        timestamp: new Date(),
-      },
-    });
+  console.log('Loading environment variables...');
+  console.log('DATABASE_URL:', process.env.DATABASE_URL);
+  const logger = new Logger('Bootstrap');
+  const app = await NestFactory.create(AppModule, new ExpressAdapter(express()), {
+    cors: true,
   });
 
-  const port: number = configService.get<number>('app.http.port');
-  const host: string = configService.get<string>('app.http.host');
-  const globalPrefix: string = configService.get<string>('app.globalPrefix');
-  const versioningPrefix: string = configService.get<string>(
-    'app.versioning.prefix',
-  );
-  const version: string = configService.get<string>('app.versioning.version');
-  const versionEnable: string = configService.get<string>(
-    'app.versioning.enable',
-  );
-  app.use(helmet());
-  app.useGlobalPipes(new ValidationPipe());
-  app.setGlobalPrefix(globalPrefix);
-  if (versionEnable) {
-    app.enableVersioning({
-      type: VersioningType.URI,
-      defaultVersion: version,
-      prefix: versioningPrefix,
-    });
+  const configService = app.get(ConfigService);
+
+  // Логируем конфигурацию для отладки
+  logger.debug('RabbitMQ Config:', {
+    uri: configService.get('rmq.uri'),
+    queue: configService.get('rmq.auth'),
+  });
+
+  // Настраиваем микросервис
+  const rmqUri = configService.get<string>('rmq.uri');
+  if (!rmqUri) {
+    throw new Error('RABBITMQ_URL is not defined');
   }
-  setupSwagger(app);
+
   app.connectMicroservice({
     transport: Transport.RMQ,
     options: {
-      urls: [`${configService.get('rmq.uri')}`],
-      queue: `${configService.get('rmq.auth')}`,
-      queueOptions: { durable: false },
-      prefetchCount: 1,
+      urls: [rmqUri],
+      queue: configService.get<string>('rmq.auth'),
+      queueOptions: {
+        durable: true,
+        arguments: {
+          'x-message-ttl': 3600000,
+        },
+      },
     },
   });
-  await app.startAllMicroservices();
-  await app.listen(port, host);
-  logger.log(
-    `🚀 ${configService.get(
-      'app.name',
-    )} service started successfully on port ${port}`,
-  );
+
+  // Настройка приложения
+  app.use(helmet());
+  app.useGlobalPipes(new ValidationPipe());
+  app.setGlobalPrefix('api');
+
+  if (configService.get('app.versioning.enable')) {
+    app.enableVersioning({
+      type: VersioningType.URI,
+      prefix: 'v',
+      defaultVersion: configService.get('app.versioning.version'),
+    });
+  }
+
+  setupSwagger(app);
+
+  try {
+    await app.startAllMicroservices();
+    logger.log('Microservice is listening');
+
+    const port = configService.get<number>('app.port') || 3000;
+    const host = configService.get<string>('app.http.host');
+    
+    await app.listen(port, host);
+    logger.log(`🚀 @backendworks/auth service started on port ${port}`);
+  } catch (error) {
+    logger.error('Failed to start application:', error);
+    process.exit(1);
+  }
 }
+
 bootstrap();

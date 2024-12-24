@@ -2,9 +2,11 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  InternalServerErrorException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+import { Prisma } from '@prisma/client';
 
 import {
   IAuthPayload,
@@ -31,18 +33,10 @@ export class AuthService implements IAuthService {
     private readonly userService: UserService,
     private readonly helperHashService: HelperHashService,
   ) {
-    this.accessTokenSecret = this.configService.get<string>(
-      'auth.accessToken.secret',
-    );
-    this.refreshTokenSecret = this.configService.get<string>(
-      'auth.refreshToken.secret',
-    );
-    this.accessTokenExp = this.configService.get<string>(
-      'auth.accessToken.expirationTime',
-    );
-    this.refreshTokenExp = this.configService.get<string>(
-      'auth.refreshToken.expirationTime',
-    );
+    this.accessTokenSecret = this.configService.get<string>('JWT_SECRET');
+    this.refreshTokenSecret = this.configService.get<string>('JWT_REFRESH_SECRET');
+    this.accessTokenExp = '15m';
+    this.refreshTokenExp = '7d';
   }
 
   async verifyToken(accessToken: string): Promise<IAuthPayload> {
@@ -53,39 +47,35 @@ export class AuthService implements IAuthService {
 
       return data;
     } catch (e) {
-      throw e;
+      throw new InternalServerErrorException('Token verification failed');
     }
   }
 
   async generateTokens(user: IAuthPayload): Promise<ITokenResponse> {
     try {
-      const accessTokenPromise = this.jwtService.signAsync(
-        {
-          id: user.id,
-          role: user.role,
-          tokenType: TokenType.ACCESS_TOKEN,
-        },
-        {
-          secret: this.accessTokenSecret,
-          expiresIn: this.accessTokenExp,
-        },
-      );
-
-      const refreshTokenPromise = this.jwtService.signAsync(
-        {
-          id: user.id,
-          role: user.role,
-          tokenType: TokenType.REFRESH_TOKEN,
-        },
-        {
-          secret: this.refreshTokenSecret,
-          expiresIn: this.refreshTokenExp,
-        },
-      );
-
       const [accessToken, refreshToken] = await Promise.all([
-        accessTokenPromise,
-        refreshTokenPromise,
+        this.jwtService.signAsync(
+          {
+            id: user.id,
+            role: user.role,
+            tokenType: TokenType.ACCESS_TOKEN,
+          },
+          {
+            secret: this.accessTokenSecret,
+            expiresIn: this.accessTokenExp,
+          },
+        ),
+        this.jwtService.signAsync(
+          {
+            id: user.id,
+            role: user.role,
+            tokenType: TokenType.REFRESH_TOKEN,
+          },
+          {
+            secret: this.refreshTokenSecret,
+            expiresIn: this.refreshTokenExp,
+          },
+        ),
       ]);
 
       return {
@@ -93,76 +83,86 @@ export class AuthService implements IAuthService {
         refreshToken,
       };
     } catch (e) {
-      throw e;
+      throw new InternalServerErrorException('Token generation failed');
     }
   }
 
   async login(data: AuthLoginDto): Promise<AuthResponseDto> {
     try {
       const { email, password } = data;
-
       const user = await this.userService.getUserByEmail(email);
 
       if (!user) {
-        throw new NotFoundException('user.userNotFound');
+        throw new NotFoundException('User not found');
       }
 
-      const match = await this.helperHashService.match(user.password, password);
+      const isPasswordValid = await this.helperHashService.match(
+        password,
+        user.password,
+      );
 
-      if (!match) {
-        throw new NotFoundException('user.invalidPassword');
+      if (!isPasswordValid) {
+        throw new NotFoundException('Invalid password');
       }
 
-      const { accessToken, refreshToken } = await this.generateTokens({
+      const tokens = await this.generateTokens({
         id: user.id,
         role: user.role,
       });
 
       return {
-        accessToken,
-        refreshToken,
+        ...tokens,
         user,
       };
     } catch (e) {
-      throw e;
+      if (e instanceof NotFoundException) {
+        throw e;
+      }
+      throw new InternalServerErrorException('Login failed');
     }
   }
 
-  async signup(data: AuthSignupDto): Promise<AuthResponseDto> {
+  async signup(dto: AuthSignupDto): Promise<AuthResponseDto> {
     try {
-      const { email, firstName, lastName, password, username } = data;
-      const findByEmail = await this.userService.getUserByEmail(email);
-      const findByUserName = await this.userService.getUserByUserName(username);
+      const { email, firstName, lastName, password, username } = dto;
+      
+      const [existingEmail, existingUsername] = await Promise.all([
+        this.userService.getUserByEmail(email),
+        username ? this.userService.getUserByUserName(username) : null,
+      ]);
 
-      if (findByEmail) {
-        throw new ConflictException('user.userExistsByEmail');
+      if (existingEmail) {
+        throw new ConflictException('Email already exists');
       }
 
-      if (findByUserName) {
-        throw new ConflictException('user.userExistsByUserName');
+      if (existingUsername) {
+        throw new ConflictException('Username already exists');
       }
 
-      const passwordHashed = this.helperHashService.createHash(password);
+      const hashedPassword = await this.helperHashService.createHash(password);
 
-      const createdUser = await this.userService.createUser({
+      const user = await this.userService.createUser({
         email,
         firstName: firstName?.trim(),
         lastName: lastName?.trim(),
-        password: passwordHashed,
+        password: hashedPassword,
         username: username?.trim(),
       });
 
       const tokens = await this.generateTokens({
-        id: createdUser.id,
-        role: createdUser.role,
+        id: user.id,
+        role: user.role,
       });
 
       return {
         ...tokens,
-        user: createdUser,
+        user,
       };
     } catch (e) {
-      throw e;
+      if (e instanceof ConflictException) {
+        throw e;
+      }
+      throw new InternalServerErrorException('Registration failed');
     }
   }
 }

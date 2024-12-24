@@ -10,10 +10,16 @@ export class AuthJwtAccessStrategy extends PassportStrategy(
   'jwt-access',
 ) {
   constructor(private readonly configService: ConfigService) {
+    const secret = configService.get<string>('auth.accessToken.secret') || 
+                  process.env.ACCESS_TOKEN_SECRET_KEY || 
+                  'temporary-secret-key';
+                  
+    console.log('Using secret:', secret);
+
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: configService.get<string>('auth.accessToken.secret'),
+      secretOrKey: secret,
     });
   }
 

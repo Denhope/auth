@@ -1,9 +1,6 @@
 import { registerAs } from '@nestjs/config';
 
-export default registerAs(
-  'rmq',
-  (): Record<string, unknown> => ({
-    uri: process.env.RABBITMQ_URL,
-    auth: process.env.RABBITMQ_AUTH_QUEUE,
-  }),
-);
+export const rmqConfig = registerAs('rmq', () => ({
+  uri: process.env.RABBITMQ_URL || 'amqp://admin:master123@localhost:5672',
+  queue: process.env.RABBITMQ_AUTH_QUEUE || 'auth_queue',
+}));

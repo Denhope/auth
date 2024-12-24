@@ -1,6 +1,11 @@
-import AppConfig from './app.config';
-import AuthConfig from './auth.config';
-import DocConfig from './doc.config';
-import RmqConfig from './rmq.config';
+import { appConfig } from './app.config';
+import { authConfig } from './auth.config';
+import { databaseConfig } from './database.config';
+import { rmqConfig } from './rmq.config';
 
-export default [AppConfig, AuthConfig, DocConfig, RmqConfig];
+export const configs = [
+  appConfig,
+  authConfig,
+  databaseConfig,
+  rmqConfig,
+];

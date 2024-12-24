@@ -10,16 +10,12 @@ import {
 export const setupSwagger = async (app: INestApplication) => {
   const configService = app.get(ConfigService);
   const logger = new Logger();
-
-  const docName: string = configService.get<string>('doc.name');
-  const docDesc: string = configService.get<string>('doc.description');
-  const docVersion: string = configService.get<string>('doc.version');
-  const docPrefix: string = configService.get<string>('doc.prefix');
+  const appConfig = configService.get('app');
 
   const documentBuild = new DocumentBuilder()
-    .setTitle(docName)
-    .setDescription(docDesc)
-    .setVersion(docVersion)
+    .setTitle(appConfig.name)
+    .setDescription('The Auth API description')
+    .setVersion(appConfig.versioning.version)
     .addBearerAuth(
       { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
       'accessToken',
@@ -33,6 +29,7 @@ export const setupSwagger = async (app: INestApplication) => {
   const document = SwaggerModule.createDocument(app, documentBuild, {
     deepScanRoutes: true,
   });
+
   const customOptions: SwaggerCustomOptions = {
     swaggerOptions: {
       docExpansion: 'none',
@@ -44,10 +41,14 @@ export const setupSwagger = async (app: INestApplication) => {
       filter: true,
     },
   };
-  SwaggerModule.setup(docPrefix, app, document, {
+
+  const swaggerPath = 'api/docs';
+  
+  SwaggerModule.setup(swaggerPath, app, document, {
     explorer: true,
-    customSiteTitle: docName,
+    customSiteTitle: appConfig.name,
     ...customOptions,
   });
-  logger.log(`Docs will serve on ${docPrefix}`, 'NestApplication');
+
+  logger.log(`Docs will serve on /${swaggerPath}`, 'NestApplication');
 };

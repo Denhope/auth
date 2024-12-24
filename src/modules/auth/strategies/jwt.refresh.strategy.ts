@@ -10,10 +10,16 @@ export class AuthJwtRefreshStrategy extends PassportStrategy(
   'jwt-refresh',
 ) {
   constructor(private readonly configService: ConfigService) {
+    const secret = configService.get<string>('auth.refreshToken.secret') || 
+                  process.env.REFRESH_TOKEN_SECRET_KEY || 
+                  'temporary-refresh-secret-key';
+                  
+    console.log('Using refresh secret:', secret);
+
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: configService.get<string>('auth.refreshToken.secret'),
+      secretOrKey: secret,
     });
   }
 

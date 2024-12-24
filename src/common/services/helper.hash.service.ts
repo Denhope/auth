@@ -3,17 +3,13 @@ import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class HelperHashService {
-  private readonly salt: string;
+  private readonly salt: number = 10;
 
-  constructor() {
-    this.salt = bcrypt.genSaltSync();
+  async createHash(password: string): Promise<string> {
+    return bcrypt.hash(password, this.salt);
   }
 
-  public createHash(password: string): string {
-    return bcrypt.hashSync(password, this.salt);
-  }
-
-  public match(hash: string, password: string): boolean {
-    return bcrypt.compareSync(password, hash);
+  async match(password: string, hash: string): Promise<boolean> {
+    return bcrypt.compare(password, hash);
   }
 }

@@ -1,29 +1,32 @@
-import { PrismaClient } from '@prisma/client';
-
-import { HelperHashService } from '../common/services/helper.hash.service';
+import { PrismaClient, Roles } from '@prisma/client';
+import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
-const hashService = new HelperHashService();
 
-async function seed() {
-  try {
-    await prisma.$connect();
+async function main() {
+  const hashedPassword = await bcrypt.hash('admin123', 10);
 
-    const passwordHash = hashService.createHash('admin123');
+  const admin = await prisma.user.upsert({
+    where: { email: 'admin@example.com' },
+    update: {},
+    create: {
+      email: 'admin@example.com',
+      password: hashedPassword,
+      username: 'admin123',
+      first_name: 'Admin',
+      last_name: 'User',
+      role: Roles.Admin,
+    },
+  });
 
-    await prisma.user.create({
-      data: {
-        email: 'admin@admin.com',
-        password: passwordHash,
-        role: 'Admin',
-        username: 'admin123',
-      },
-    });
-
-    await prisma.$disconnect();
-  } catch (e) {
-    throw e;
-  }
+  console.log({ admin });
 }
 
-seed();
+main()
+  .catch((e) => {
+    console.error(e);
+    process.exit(1);
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });
